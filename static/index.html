@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DDR Report Generator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: #f5f7fa; color: #1a1a2e; display: flex; justify-content: center; padding: 40px 20px; }
+  .card { background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.08);
+          max-width: 640px; width: 100%; padding: 32px; }
+  h1 { font-size: 24px; margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 14px; margin-bottom: 28px; }
+  .form-group { margin-bottom: 20px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #333; }
+  select, input[type="password"], input[type="file"] { width: 100%; padding: 10px 12px;
+         border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background: #fafbfc; }
+  select:focus, input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+  .file-row { display: flex; gap: 12px; }
+  .file-row .form-group { flex: 1; }
+  button { width: 100%; padding: 12px; background: #2563eb; color: #fff; border: none;
+           border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  button:hover { background: #1d4ed8; }
+  button:disabled { background: #93c5fd; cursor: not-allowed; }
+  .error { background: #fef2f2; color: #dc2626; padding: 12px; border-radius: 8px; margin-top: 16px;
+           font-size: 14px; display: none; }
+  .result { background: #f0fdf4; color: #16a34a; padding: 12px; border-radius: 8px; margin-top: 16px;
+            font-size: 14px; display: none; }
+  .result a { color: #2563eb; }
+  .spinner { display: none; text-align: center; margin-top: 16px; }
+  .spinner::after { content: " "; display: inline-block; width: 24px; height: 24px;
+         border: 3px solid #d1d5db; border-top-color: #2563eb; border-radius: 50%;
+         animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .validate-btn { margin-top: 4px; padding: 6px 14px; font-size: 12px; background: #e5e7eb;
+                  color: #374151; border: none; border-radius: 6px; cursor: pointer; }
+  .validate-btn:hover { background: #d1d5db; }
+  .val-status { font-size: 12px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>DDR Report Generator</h1>
+  <p class="subtitle">Upload Inspection &amp; Thermal PDFs to generate a Detailed Diagnostic Report</p>
+
+  <form id="uploadForm">
+    <div class="form-group">
+      <label for="provider">AI Provider</label>
+      <select id="provider" name="provider" required></select>
+    </div>
+
+    <div class="form-group">
+      <label for="apiKey">API Key</label>
+      <div style="display:flex; gap:8px;">
+        <input type="password" id="apiKey" name="apiKey" placeholder="sk-..." required style="flex:1; min-width:300px; font-size:14px;">
+        <button type="button" class="validate-btn" id="validateBtn">Validate</button>
+      </div>
+      <div id="valStatus" class="val-status"></div>
+    </div>
+
+    <div class="file-row">
+      <div class="form-group">
+        <label for="inspection_report">Inspection Report (PDF or ZIP)</label>
+        <input type="file" id="inspection_report" name="inspection_report" accept=".pdf,.zip" required>
+      </div>
+      <div class="form-group">
+        <label for="thermal_report">Thermal Report (PDF or ZIP)</label>
+        <input type="file" id="thermal_report" name="thermal_report" accept=".pdf,.zip" required>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="additional_images">Additional Images (ZIP)</label>
+      <input type="file" id="additional_images" name="additional_images" accept=".zip">
+      <span style="font-size:12px;color:#888;">Optional — upload a zip of extra site images</span>
+    </div>
+
+    <button type="submit" id="submitBtn">Generate DDR</button>
+  </form>
+
+  <div class="spinner" id="spinner"></div>
+  <div class="error" id="error"></div>
+  <div class="result" id="result"></div>
+</div>
+
+<script>
+async function loadProviders() {
+  try {
+    const r = await fetch('/providers');
+    const data = await r.json();
+    const sel = document.getElementById('provider');
+    data.supported.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p; opt.textContent = p.charAt(0).toUpperCase() + p.slice(1);
+      sel.appendChild(opt);
+    });
+  } catch(e) {
+    document.getElementById('error').textContent = 'Failed to load providers. Is the server running?';
+    document.getElementById('error').style.display = 'block';
+  }
+}
+loadProviders();
+
+document.getElementById('validateBtn').addEventListener('click', async () => {
+  const provider = document.getElementById('provider').value;
+  const apiKey = document.getElementById('apiKey').value;
+  const status = document.getElementById('valStatus');
+  if (!apiKey) { status.textContent = 'Enter an API key first.'; status.style.color = '#dc2626'; return; }
+  status.textContent = 'Validating...'; status.style.color = '#666';
+  try {
+    const r = await fetch('/validate-key', {
+      method: 'POST',
+      headers: { 'X-Provider': provider, 'X-API-Key': apiKey }
+    });
+    const data = await r.json();
+    if (data.valid) {
+      status.textContent = 'Key is valid!';
+      status.style.color = '#16a34a';
+    } else {
+      status.textContent = 'Key is invalid or unauthorized.';
+      status.style.color = '#dc2626';
+    }
+  } catch(e) {
+    status.textContent = 'Could not validate key.';
+    status.style.color = '#dc2626';
+  }
+});
+
+document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const provider = document.getElementById('provider').value;
+  const apiKey = document.getElementById('apiKey').value;
+  const insp = document.getElementById('inspection_report').files[0];
+  const therm = document.getElementById('thermal_report').files[0];
+
+  if (!insp || !therm) { showError('Please select both PDF files.'); return; }
+
+  const formData = new FormData();
+  formData.append('inspection_report', insp);
+  formData.append('thermal_report', therm);
+  const extra = document.getElementById('additional_images').files[0];
+  if (extra) formData.append('additional_images', extra);
+
+  document.getElementById('submitBtn').disabled = true;
+  document.getElementById('spinner').style.display = 'block';
+  hideError();
+  hideResult();
+
+  try {
+    const r = await fetch('/generate-ddr', {
+      method: 'POST',
+      headers: { 'X-Provider': provider, 'X-API-Key': apiKey },
+      body: formData
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showError(data.detail || 'Request failed');
+      return;
+    }
+    showResult(data);
+  } catch(e) {
+    showError('Network error: ' + e.message);
+  } finally {
+    document.getElementById('submitBtn').disabled = false;
+    document.getElementById('spinner').style.display = 'none';
+  }
+});
+
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.textContent = msg; el.style.display = 'block';
+}
+function hideError() {
+  document.getElementById('error').style.display = 'none';
+}
+function showResult(data) {
+  const el = document.getElementById('result');
+  el.innerHTML = `
+    <strong>Done!</strong> Job: ${data.job_id} | Provider: ${data.provider}<br>
+    <a href="${data.docx_download_url}" target="_blank">Download DDR (.docx)</a>
+  `;
+  el.style.display = 'block';
+}
+function hideResult() {
+  document.getElementById('result').style.display = 'none';
+}
+</script>
+</body>
+</html>
